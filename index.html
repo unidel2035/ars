@@ -582,6 +582,11 @@ function shoot() {
   state.ammo--;
   weaponRecoil = 1.0;
 
+  // Camera recoil — kick up
+  camera.rotation.x += 0.015 + Math.random() * 0.01;
+  // Slight random horizontal shake
+  camera.rotation.y += (Math.random() - 0.5) * 0.005;
+
   // Muzzle flash
   const muzzle = weaponGroup.getObjectByName('muzzleLight');
   if (muzzle) {
