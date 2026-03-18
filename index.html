@@ -167,6 +167,8 @@ const state = {
   playerHeight: 1.6,
   crouchHeight: 0.9,
   isCrouching: false,
+  mouseDown: false,
+  shootCooldown: 0,
 };
 
 // ============ LEVEL CONFIGS ============
@@ -556,9 +558,9 @@ function updateEnemies(delta) {
 }
 
 function shoot() {
-  if (!state.canShoot || state.ammo <= 0 || state.paused) return;
+  if (state.ammo <= 0 || state.paused) return;
 
-  state.canShoot = false;
+  state.shootCooldown = state.fireRate / 1000;
   state.ammo--;
   weaponRecoil = 1.0;
 
@@ -598,7 +600,6 @@ function shoot() {
     }
   }
 
-  setTimeout(() => { state.canShoot = true; }, state.fireRate);
 }
 
 function damageEnemy(enemy, amount) {
@@ -883,9 +884,11 @@ document.addEventListener('keyup', (e) => {
 });
 
 document.addEventListener('mousedown', (e) => {
-  if (e.button === 0 && state.playing && !state.paused && controls.isLocked) {
-    shoot();
-  }
+  if (e.button === 0) state.mouseDown = true;
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (e.button === 0) state.mouseDown = false;
 });
 
 controls.addEventListener('lock', () => {
@@ -920,6 +923,12 @@ function animate() {
     updateEnemies(delta);
     updateWeapon(delta);
     updateHUD();
+
+    // Auto-fire while mouse held
+    if (state.shootCooldown > 0) state.shootCooldown -= delta;
+    if (state.mouseDown && state.shootCooldown <= 0 && controls.isLocked) {
+      shoot();
+    }
   }
 
   renderer.render(scene, camera);
