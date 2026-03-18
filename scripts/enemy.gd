@@ -5,6 +5,7 @@ extends CharacterBody3D
 @export var damage := 10.0
 @export var attack_range := 2.0
 @export var detection_range := 15.0
+@export var score_value := 100
 
 var player: CharacterBody3D = null
 var is_dead := false
@@ -13,7 +14,7 @@ var is_dead := false
 
 
 func _ready() -> void:
-	# Найти игрока в сцене
+	add_to_group("enemies")
 	await get_tree().process_frame
 	player = get_tree().get_first_node_in_group("player")
 
@@ -24,7 +25,6 @@ func _physics_process(delta: float) -> void:
 
 	var distance_to_player := global_position.distance_to(player.global_position)
 
-	# Если игрок в зоне обнаружения — идём к нему
 	if distance_to_player <= detection_range:
 		nav_agent.target_position = player.global_position
 
@@ -33,18 +33,14 @@ func _physics_process(delta: float) -> void:
 			var direction := (next_pos - global_position).normalized()
 			direction.y = 0
 			velocity = direction * speed
-
-			# Поворачиваемся к игроку
 			look_at(Vector3(player.global_position.x, global_position.y, player.global_position.z), Vector3.UP)
 
-		# Атакуем если близко
 		if distance_to_player <= attack_range:
 			velocity = Vector3.ZERO
 			attack()
 	else:
 		velocity = Vector3.ZERO
 
-	# Гравитация
 	if not is_on_floor():
 		velocity.y -= 9.8 * delta
 
@@ -62,7 +58,6 @@ func take_damage(amount: float) -> void:
 
 	health -= amount
 
-	# Мигание при попадании (красный)
 	var mesh := find_child("MeshInstance3D") as MeshInstance3D
 	if mesh and mesh.material_override:
 		var mat: StandardMaterial3D = mesh.material_override
@@ -78,7 +73,8 @@ func take_damage(amount: float) -> void:
 
 func die() -> void:
 	is_dead = true
-	# Анимация смерти — враг падает
+	GameManager.add_score(score_value)
+	remove_from_group("enemies")
 	var tween := create_tween()
 	tween.tween_property(self, "scale", Vector3(1.0, 0.1, 1.0), 0.3)
 	tween.tween_callback(queue_free)

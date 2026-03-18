@@ -1,0 +1,189 @@
+[gd_scene load_steps=16 format=3 uid="uid://level2001"]
+
+[ext_resource type="PackedScene" uid="uid://player001" path="res://scenes/player.tscn" id="1_player"]
+[ext_resource type="PackedScene" uid="uid://enemy001" path="res://scenes/enemy.tscn" id="2_enemy"]
+[ext_resource type="Script" path="res://scripts/level_gate.gd" id="3_gate"]
+
+[sub_resource type="StandardMaterial3D" id="FloorMaterial"]
+albedo_color = Color(0.25, 0.2, 0.3, 1)
+
+[sub_resource type="StandardMaterial3D" id="WallMaterial"]
+albedo_color = Color(0.4, 0.35, 0.45, 1)
+
+[sub_resource type="StandardMaterial3D" id="PillarMaterial"]
+albedo_color = Color(0.35, 0.3, 0.4, 1)
+
+[sub_resource type="BoxMesh" id="FloorMesh"]
+size = Vector3(30, 0.2, 30)
+material = SubResource("FloorMaterial")
+
+[sub_resource type="BoxShape3D" id="FloorShape"]
+size = Vector3(30, 0.2, 30)
+
+[sub_resource type="BoxMesh" id="WallMesh"]
+size = Vector3(30, 4, 0.3)
+material = SubResource("WallMaterial")
+
+[sub_resource type="BoxShape3D" id="WallShape"]
+size = Vector3(30, 4, 0.3)
+
+[sub_resource type="BoxMesh" id="PillarMesh"]
+size = Vector3(1.5, 4, 1.5)
+material = SubResource("PillarMaterial")
+
+[sub_resource type="BoxShape3D" id="PillarShape"]
+size = Vector3(1.5, 4, 1.5)
+
+[sub_resource type="NavigationMesh" id="NavMesh_1"]
+vertices = PackedVector3Array(-15, 0.1, -15, -15, 0.1, 15, 15, 0.1, 15, 15, 0.1, -15)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+
+[sub_resource type="StandardMaterial3D" id="GateMaterial"]
+albedo_color = Color(0.2, 1.0, 0.2, 1)
+emission_enabled = true
+emission = Color(0.2, 1.0, 0.2, 1)
+emission_energy_multiplier = 2.0
+
+[sub_resource type="BoxMesh" id="GateMesh"]
+size = Vector3(2, 3, 0.1)
+material = SubResource("GateMaterial")
+
+[node name="Level2" type="Node3D"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 10, 0)
+light_energy = 0.6
+shadow_enabled = true
+
+[node name="OmniLight1" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 3, -8)
+light_color = Color(1, 0.7, 0.4, 1)
+light_energy = 2.0
+omni_range = 10.0
+
+[node name="OmniLight2" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 3, 8)
+light_color = Color(0.4, 0.7, 1, 1)
+light_energy = 2.0
+omni_range = 10.0
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+navigation_mesh = SubResource("NavMesh_1")
+
+[node name="Floor" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/Floor"]
+mesh = SubResource("FloorMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/Floor"]
+shape = SubResource("FloorShape")
+
+[node name="WallNorth" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -15)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/WallNorth"]
+mesh = SubResource("WallMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/WallNorth"]
+shape = SubResource("WallShape")
+
+[node name="WallSouth" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 15)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/WallSouth"]
+mesh = SubResource("WallMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/WallSouth"]
+shape = SubResource("WallShape")
+
+[node name="WallEast" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 15, 2, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/WallEast"]
+mesh = SubResource("WallMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/WallEast"]
+shape = SubResource("WallShape")
+
+[node name="WallWest" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -15, 2, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/WallWest"]
+mesh = SubResource("WallMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/WallWest"]
+shape = SubResource("WallShape")
+
+[node name="Pillar1" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 2, -5)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/Pillar1"]
+mesh = SubResource("PillarMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/Pillar1"]
+shape = SubResource("PillarShape")
+
+[node name="Pillar2" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 2, -5)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/Pillar2"]
+mesh = SubResource("PillarMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/Pillar2"]
+shape = SubResource("PillarShape")
+
+[node name="Pillar3" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 2, 5)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/Pillar3"]
+mesh = SubResource("PillarMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/Pillar3"]
+shape = SubResource("PillarShape")
+
+[node name="Pillar4" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 2, 5)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/Pillar4"]
+mesh = SubResource("PillarMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/Pillar4"]
+shape = SubResource("PillarShape")
+
+[node name="Pillar5" type="StaticBody3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/Pillar5"]
+mesh = SubResource("PillarMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/Pillar5"]
+shape = SubResource("PillarShape")
+
+[node name="Player" parent="NavigationRegion3D" instance=ExtResource("1_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 12)
+
+[node name="Enemy1" parent="NavigationRegion3D" instance=ExtResource("2_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, -8)
+
+[node name="Enemy2" parent="NavigationRegion3D" instance=ExtResource("2_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0, -8)
+
+[node name="Enemy3" parent="NavigationRegion3D" instance=ExtResource("2_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0, 5)
+
+[node name="Enemy4" parent="NavigationRegion3D" instance=ExtResource("2_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 3)
+
+[node name="Enemy5" parent="NavigationRegion3D" instance=ExtResource("2_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -12)
+
+[node name="LevelGate" type="Area3D" parent="NavigationRegion3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -14.5)
+script = ExtResource("3_gate")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="NavigationRegion3D/LevelGate"]
+mesh = SubResource("GateMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationRegion3D/LevelGate"]
+shape = SubResource("FloorShape")
