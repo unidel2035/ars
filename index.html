@@ -923,7 +923,10 @@ document.addEventListener('keydown', (e) => {
     if (state.paused) resumeGame();
     else pauseGame();
   }
-  if (e.code === 'KeyR' && state.playing && !state.paused) reload();
+  if ((e.code === 'KeyR' || e.code === 'ControlLeft' || e.code === 'ControlRight') && state.playing && !state.paused) {
+    e.preventDefault();
+    reload();
+  }
 });
 
 document.addEventListener('keyup', (e) => {
