@@ -583,10 +583,14 @@ function shoot() {
   state.ammo--;
   weaponRecoil = 1.0;
 
-  // Camera recoil — vertical only (kick up)
-  const kick = 0.012 + Math.random() * 0.006;
-  state.cameraRecoil += kick;
-  camera.rotation.x += kick;
+  // Camera recoil — vertical only, capped
+  const maxRecoil = 0.06; // ~3.5 degrees max
+  if (state.cameraRecoil < maxRecoil) {
+    const kick = 0.003 + Math.random() * 0.002;
+    const actual = Math.min(kick, maxRecoil - state.cameraRecoil);
+    state.cameraRecoil += actual;
+    camera.rotation.x += actual;
+  }
 
   // Muzzle flash
   const muzzle = weaponGroup.getObjectByName('muzzleLight');
@@ -754,7 +758,7 @@ function updateDamageEffects(delta) {
 function updateRecoilRecovery(delta) {
   // When not shooting, smoothly pull camera back down
   if (state.cameraRecoil > 0 && !state.mouseDown) {
-    const recovery = Math.min(state.cameraRecoil, delta * 3);
+    const recovery = Math.min(state.cameraRecoil, delta * 5);
     camera.rotation.x -= recovery;
     state.cameraRecoil -= recovery;
     if (state.cameraRecoil < 0.001) state.cameraRecoil = 0;
