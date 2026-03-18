@@ -154,6 +154,9 @@ const state = {
   canShoot: true,
   fireRate: 120,
   damage: 50,
+  isReloading: false,
+  reloadTime: 2.0,
+  reloadTimer: 0,
   enemies: [],
   moveSpeed: 4.5,
   sensitivity: 1.0,
@@ -447,6 +450,8 @@ function buildLevel(index) {
   state.health = state.maxHealth;
   state.ammo = state.maxAmmo;
   state.canShoot = true;
+  state.isReloading = false;
+  state.reloadTimer = 0;
 
   showLevelMessage(cfg.name);
 }
@@ -558,7 +563,11 @@ function updateEnemies(delta) {
 }
 
 function shoot() {
-  if (state.ammo <= 0 || state.paused) return;
+  if (state.isReloading || state.paused) return;
+  if (state.ammo <= 0) {
+    startReload();
+    return;
+  }
 
   state.shootCooldown = state.fireRate / 1000;
   state.ammo--;
@@ -655,7 +664,43 @@ function takeDamage(amount) {
 }
 
 function reload() {
-  state.ammo = state.maxAmmo;
+  if (state.isReloading || state.ammo === state.maxAmmo) return;
+  startReload();
+}
+
+function startReload() {
+  if (state.isReloading) return;
+  state.isReloading = true;
+  state.reloadTimer = state.reloadTime;
+}
+
+function updateReload(delta) {
+  if (!state.isReloading) return;
+  state.reloadTimer -= delta;
+
+  // Animate weapon: move down then back up
+  const progress = 1.0 - (state.reloadTimer / state.reloadTime);
+  if (progress < 0.4) {
+    // Weapon goes down
+    const t = progress / 0.4;
+    weaponGroup.position.y = -0.25 - t * 0.4;
+    weaponGroup.rotation.z = t * 0.3;
+  } else if (progress < 0.6) {
+    // Hold down (swapping mag)
+    weaponGroup.position.y = -0.65;
+    weaponGroup.rotation.z = 0.3;
+  } else {
+    // Weapon comes back up
+    const t = (progress - 0.6) / 0.4;
+    weaponGroup.position.y = -0.65 + t * 0.4;
+    weaponGroup.rotation.z = 0.3 * (1 - t);
+  }
+
+  if (state.reloadTimer <= 0) {
+    state.isReloading = false;
+    state.ammo = state.maxAmmo;
+    state.reloadTimer = 0;
+  }
 }
 
 // ============ LEVEL MANAGEMENT ============
@@ -863,7 +908,9 @@ function updateHUD() {
 
   healthEl.textContent = 'HP: ' + Math.ceil(state.health);
   healthEl.style.color = state.health > 50 ? '#0f0' : state.health > 25 ? '#ff0' : '#f00';
-  ammoEl.textContent = state.ammo + ' / ' + state.maxAmmo;
+  ammoEl.textContent = state.isReloading
+    ? 'RELOADING...'
+    : state.ammo + ' / ' + state.maxAmmo;
   scoreEl.textContent = 'Score: ' + state.score;
   levelEl.textContent = 'Level ' + (state.level + 1);
 }
@@ -924,9 +971,12 @@ function animate() {
     updateWeapon(delta);
     updateHUD();
 
+    // Reload animation
+    updateReload(delta);
+
     // Auto-fire while mouse held
     if (state.shootCooldown > 0) state.shootCooldown -= delta;
-    if (state.mouseDown && state.shootCooldown <= 0 && controls.isLocked) {
+    if (state.mouseDown && state.shootCooldown <= 0 && !state.isReloading && controls.isLocked) {
       shoot();
     }
   }
