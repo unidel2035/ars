@@ -292,6 +292,8 @@ function clearLevel() {
     scene.remove(e.mesh);
   }
   if (gateObject) scene.remove(gateObject);
+  for (const h of bulletHoles) scene.remove(h);
+  bulletHoles.length = 0;
   levelObjects = [];
   levelLights = [];
   state.enemies = [];
@@ -592,10 +594,11 @@ function shoot() {
     });
   }
 
+  // Check enemy hits first
   const hits = raycaster.intersectObjects(allTargets, false);
+  let hitEnemy = false;
   if (hits.length > 0) {
     const hitObj = hits[0].object;
-    // Find which enemy was hit
     for (const enemy of state.enemies) {
       if (!enemy.alive) continue;
       let found = false;
@@ -604,11 +607,46 @@ function shoot() {
       });
       if (found) {
         damageEnemy(enemy, state.damage);
+        hitEnemy = true;
         break;
       }
     }
   }
 
+  // If no enemy hit, check walls/floor/obstacles for bullet hole
+  if (!hitEnemy) {
+    const wallHits = raycaster.intersectObjects(levelObjects, false);
+    if (wallHits.length > 0) {
+      spawnBulletHole(wallHits[0].point, wallHits[0].face.normal);
+    }
+  }
+}
+
+// Bullet holes
+const bulletHoles = [];
+const MAX_BULLET_HOLES = 100;
+const bulletHoleGeo = new THREE.CircleGeometry(0.04, 8);
+const bulletHoleMat = new THREE.MeshBasicMaterial({ color: 0x111111, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
+
+function spawnBulletHole(position, normal) {
+  const hole = new THREE.Mesh(bulletHoleGeo, bulletHoleMat);
+  hole.position.copy(position).addScaledVector(normal, 0.01);
+  hole.lookAt(position.clone().add(normal));
+
+  // Random slight rotation for variety
+  hole.rotation.z = Math.random() * Math.PI * 2;
+  // Slight random size variation
+  const s = 0.8 + Math.random() * 0.5;
+  hole.scale.set(s, s, s);
+
+  scene.add(hole);
+  bulletHoles.push(hole);
+
+  // Remove old holes if too many
+  if (bulletHoles.length > MAX_BULLET_HOLES) {
+    const old = bulletHoles.shift();
+    scene.remove(old);
+  }
 }
 
 function damageEnemy(enemy, amount) {
