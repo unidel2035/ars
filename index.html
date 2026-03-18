@@ -81,12 +81,24 @@ canvas { display: block; }
   <div class="menu-title">ARS</div>
   <div class="menu-subtitle">FIRST PERSON SHOOTER</div>
   <button class="menu-btn" onclick="startGame()">PLAY</button>
+  <div style="margin-top: 30px; text-align: center;">
+    <label style="color: #888; font-size: 16px;">Mouse Sensitivity</label><br>
+    <input type="range" id="sens-main" min="1" max="20" value="10" style="width: 200px; margin-top: 8px;"
+      oninput="setSensitivity(this.value)">
+    <div id="sens-main-val" style="color: #aaa; font-size: 14px; margin-top: 4px;">10</div>
+  </div>
 </div>
 
 <!-- Pause Menu -->
 <div id="pause-menu" class="menu-overlay">
   <div class="menu-title" style="font-size:48px">PAUSED</div>
   <button class="menu-btn" onclick="resumeGame()">RESUME</button>
+  <div style="margin: 15px 0; text-align: center;">
+    <label style="color: #888; font-size: 16px;">Mouse Sensitivity</label><br>
+    <input type="range" id="sens-pause" min="1" max="20" value="10" style="width: 200px; margin-top: 8px;"
+      oninput="setSensitivity(this.value)">
+    <div id="sens-pause-val" style="color: #aaa; font-size: 14px; margin-top: 4px;">10</div>
+  </div>
   <button class="menu-btn" onclick="goToMenu()">MAIN MENU</button>
 </div>
 
@@ -141,14 +153,18 @@ const state = {
   level: 0,
   canShoot: true,
   fireRate: 120,
-  damage: 25,
+  damage: 50,
   enemies: [],
-  moveSpeed: 8,
+  moveSpeed: 4.5,
+  sensitivity: 1.0,
   keys: {},
   velocity: new THREE.Vector3(),
   direction: new THREE.Vector3(),
-  gravity: 20,
+  gravity: 25,
+  jumpForce: 8,
+  verticalVelocity: 0,
   onGround: true,
+  playerHeight: 1.6,
 };
 
 // ============ LEVEL CONFIGS ============
@@ -158,7 +174,7 @@ const levels = [
     size: 20, wallHeight: 4, enemyCount: 3,
     floorColor: 0x4a4a55, wallColor: 0x7a7a88,
     enemySpeed: 3, obstacles: [],
-    lightColor: 0xffffff, lightIntensity: 0.8,
+    lightColor: 0xffffff, lightIntensity: 1.2,
   },
   {
     name: "Level 2 — Dark Corridors",
@@ -172,7 +188,7 @@ const levels = [
       { x: 5, z: 5, w: 1.5, h: 4, d: 1.5 },
       { x: 0, z: 0, w: 1.5, h: 4, d: 1.5 },
     ],
-    lightColor: 0xffaa66, lightIntensity: 0.5,
+    lightColor: 0xffaa66, lightIntensity: 1.0,
   },
   {
     name: "Level 3 — The Arena",
@@ -187,7 +203,7 @@ const levels = [
       { x: -3, z: 12, w: 2, h: 2, d: 2 },
       { x: 14, z: -8, w: 2, h: 2, d: 2 },
     ],
-    lightColor: 0xff5533, lightIntensity: 0.4,
+    lightColor: 0xff5533, lightIntensity: 0.8,
   }
 ];
 
@@ -281,16 +297,21 @@ function buildLevel(index) {
   const cfg = levels[index];
   const half = cfg.size / 2;
 
-  scene.fog = new THREE.Fog(0x000000, half * 0.5, half * 2);
-  scene.background = new THREE.Color(0x050508);
+  scene.fog = new THREE.Fog(0x111118, half * 0.8, half * 3);
+  scene.background = new THREE.Color(0x0a0a10);
 
-  // Ambient light
-  const ambient = new THREE.AmbientLight(0x222233, 0.3);
+  // Strong ambient light
+  const ambient = new THREE.AmbientLight(0x667788, 0.8);
   scene.add(ambient);
   levelLights.push(ambient);
 
-  // Directional light
-  const dirLight = new THREE.DirectionalLight(cfg.lightColor, cfg.lightIntensity);
+  // Hemisphere light for natural fill
+  const hemiLight = new THREE.HemisphereLight(0xaabbcc, 0x444466, 0.6);
+  scene.add(hemiLight);
+  levelLights.push(hemiLight);
+
+  // Directional light (brighter)
+  const dirLight = new THREE.DirectionalLight(cfg.lightColor, cfg.lightIntensity * 1.8);
   dirLight.position.set(half * 0.5, cfg.wallHeight * 2, half * 0.3);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.set(1024, 1024);
@@ -300,6 +321,26 @@ function buildLevel(index) {
   dirLight.shadow.camera.bottom = -half;
   scene.add(dirLight);
   levelLights.push(dirLight);
+
+  // Extra fill lights in all corners
+  const cornerPositions = [
+    [-half * 0.6, 3, -half * 0.6],
+    [half * 0.6, 3, -half * 0.6],
+    [-half * 0.6, 3, half * 0.6],
+    [half * 0.6, 3, half * 0.6],
+  ];
+  for (const cp of cornerPositions) {
+    const cl = new THREE.PointLight(0xeeeeff, 1.5, half * 1.2);
+    cl.position.set(cp[0], cp[1], cp[2]);
+    scene.add(cl);
+    levelLights.push(cl);
+  }
+
+  // Center ceiling light
+  const centerLight = new THREE.PointLight(0xffffff, 2, half * 1.5);
+  centerLight.position.set(0, cfg.wallHeight - 0.5, 0);
+  scene.add(centerLight);
+  levelLights.push(centerLight);
 
   // Floor
   const floorGeo = new THREE.PlaneGeometry(cfg.size, cfg.size);
@@ -357,22 +398,22 @@ function buildLevel(index) {
     levelObjects.push(obMesh);
   }
 
-  // Extra lights for level 2+
+  // Extra colored lights for level 2+
   if (index >= 1) {
-    const l1 = new THREE.PointLight(0xffaa44, 2, half);
+    const l1 = new THREE.PointLight(0xffaa44, 3, half * 1.2);
     l1.position.set(-half * 0.5, 3, -half * 0.5);
     scene.add(l1); levelLights.push(l1);
 
-    const l2 = new THREE.PointLight(0x4477ff, 2, half);
+    const l2 = new THREE.PointLight(0x4477ff, 3, half * 1.2);
     l2.position.set(half * 0.5, 3, half * 0.5);
     scene.add(l2); levelLights.push(l2);
   }
   if (index >= 2) {
-    const l3 = new THREE.PointLight(0xff3322, 3, half * 0.8);
+    const l3 = new THREE.PointLight(0xff5533, 4, half);
     l3.position.set(-half * 0.6, 3, half * 0.4);
     scene.add(l3); levelLights.push(l3);
 
-    const l4 = new THREE.PointLight(0xff3322, 3, half * 0.8);
+    const l4 = new THREE.PointLight(0xff5533, 4, half);
     l4.position.set(half * 0.6, 3, -half * 0.4);
     scene.add(l4); levelLights.push(l4);
   }
@@ -393,8 +434,10 @@ function buildLevel(index) {
   scene.add(gateObject);
 
   // Player start position
-  camera.position.set(0, 1.6, half - 3);
+  camera.position.set(0, state.playerHeight, half - 3);
   state.velocity.set(0, 0, 0);
+  state.verticalVelocity = 0;
+  state.onGround = true;
 
   // Reset player
   state.health = state.maxHealth;
@@ -689,6 +732,17 @@ function hideAllMenus() {
   document.getElementById('victory-menu').style.display = 'none';
 }
 
+// Sensitivity control
+function setSensitivity(val) {
+  state.sensitivity = val / 10.0;
+  controls.pointerSpeed = state.sensitivity;
+  document.getElementById('sens-main-val').textContent = val;
+  document.getElementById('sens-pause-val').textContent = val;
+  document.getElementById('sens-main').value = val;
+  document.getElementById('sens-pause').value = val;
+}
+window.setSensitivity = setSensitivity;
+
 // Expose to HTML buttons
 window.startGame = startGame;
 window.resumeGame = resumeGame;
@@ -719,6 +773,23 @@ function updateMovement(delta) {
   if (state.keys['KeyA']) { state.velocity.x -= right.x * speed * delta; state.velocity.z -= right.z * speed * delta; }
   if (state.keys['KeyD']) { state.velocity.x += right.x * speed * delta; state.velocity.z += right.z * speed * delta; }
 
+  // Jump
+  if (state.keys['Space'] && state.onGround) {
+    state.verticalVelocity = state.jumpForce;
+    state.onGround = false;
+  }
+
+  // Gravity
+  state.verticalVelocity -= state.gravity * delta;
+  camera.position.y += state.verticalVelocity * delta;
+
+  // Ground check
+  if (camera.position.y <= state.playerHeight) {
+    camera.position.y = state.playerHeight;
+    state.verticalVelocity = 0;
+    state.onGround = true;
+  }
+
   camera.position.x += state.velocity.x;
   camera.position.z += state.velocity.z;
 
@@ -734,7 +805,6 @@ function updateMovement(delta) {
     const hw = s.width / 2 + 0.4;
     const hd = s.depth / 2 + 0.4;
     if (Math.abs(camera.position.x - op.x) < hw && Math.abs(camera.position.z - op.z) < hd) {
-      // Push out
       const dx = camera.position.x - op.x;
       const dz = camera.position.z - op.z;
       if (Math.abs(dx) / hw > Math.abs(dz) / hd) {
@@ -744,9 +814,6 @@ function updateMovement(delta) {
       }
     }
   }
-
-  // Keep camera at eye height
-  camera.position.y = 1.6;
 }
 
 // ============ WEAPON ANIMATION ============
