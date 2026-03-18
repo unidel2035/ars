@@ -361,7 +361,7 @@ function buildLevel(index) {
 
   // Floor
   const floorGeo = new THREE.PlaneGeometry(cfg.size, cfg.size);
-  const floorMat = new THREE.MeshStandardMaterial({ color: cfg.floorColor, roughness: 0.8 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: cfg.floorColor, roughness: 0.8, side: THREE.DoubleSide });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
@@ -370,15 +370,15 @@ function buildLevel(index) {
 
   // Ceiling
   const ceilGeo = new THREE.PlaneGeometry(cfg.size, cfg.size);
-  const ceilMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 1 });
+  const ceilMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 1, side: THREE.DoubleSide });
   const ceil = new THREE.Mesh(ceilGeo, ceilMat);
   ceil.rotation.x = Math.PI / 2;
   ceil.position.y = cfg.wallHeight;
   scene.add(ceil);
   levelObjects.push(ceil);
 
-  // Walls
-  const wallMat = new THREE.MeshStandardMaterial({ color: cfg.wallColor, roughness: 0.7 });
+  // Walls (side: THREE.DoubleSide so raycasts hit from inside)
+  const wallMat = new THREE.MeshStandardMaterial({ color: cfg.wallColor, roughness: 0.7, side: THREE.DoubleSide });
   const wallPositions = [
     { x: 0, z: -half, ry: 0 },
     { x: 0, z: half, ry: 0 },
@@ -640,12 +640,12 @@ function shoot() {
 // Bullet holes
 const bulletHoles = [];
 const MAX_BULLET_HOLES = 100;
-const bulletHoleGeo = new THREE.CircleGeometry(0.04, 8);
-const bulletHoleMat = new THREE.MeshBasicMaterial({ color: 0x111111, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
+const bulletHoleGeo = new THREE.CircleGeometry(0.08, 10);
+const bulletHoleMat = new THREE.MeshBasicMaterial({ color: 0x050505, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
 
 function spawnBulletHole(position, normal) {
   const hole = new THREE.Mesh(bulletHoleGeo, bulletHoleMat);
-  hole.position.copy(position).addScaledVector(normal, 0.01);
+  hole.position.copy(position).addScaledVector(normal, 0.02);
   hole.lookAt(position.clone().add(normal));
 
   // Random slight rotation for variety
