@@ -179,6 +179,7 @@ const state = {
   isCrouching: false,
   mouseDown: false,
   shootCooldown: 0,
+  cameraRecoil: 0,
 };
 
 // ============ LEVEL CONFIGS ============
@@ -582,8 +583,10 @@ function shoot() {
   state.ammo--;
   weaponRecoil = 1.0;
 
-  // Camera recoil — kick up
-  camera.rotation.x += 0.015 + Math.random() * 0.01;
+  // Camera recoil — accumulate kick
+  const kick = 0.015 + Math.random() * 0.01;
+  state.cameraRecoil += kick;
+  camera.rotation.x += kick;
   // Slight random horizontal shake
   camera.rotation.y += (Math.random() - 0.5) * 0.005;
 
@@ -734,6 +737,16 @@ function updateDamageEffects(delta) {
     vignette.style.opacity = intensity * pulse + intensity * 0.4;
   } else {
     vignette.style.opacity = 0;
+  }
+}
+
+function updateRecoilRecovery(delta) {
+  // When not shooting, smoothly pull camera back down
+  if (state.cameraRecoil > 0 && !state.mouseDown) {
+    const recovery = Math.min(state.cameraRecoil, delta * 3);
+    camera.rotation.x -= recovery;
+    state.cameraRecoil -= recovery;
+    if (state.cameraRecoil < 0.001) state.cameraRecoil = 0;
   }
 }
 
@@ -1047,6 +1060,7 @@ function animate() {
     updateEnemies(delta);
     updateWeapon(delta);
     updateDamageEffects(delta);
+    updateRecoilRecovery(delta);
     updateHUD();
 
     // Reload animation
