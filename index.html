@@ -64,8 +64,14 @@ canvas { display: block; }
 }
 #damage-flash {
   position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(255, 0, 0, 0.3); pointer-events: none;
-  z-index: 9; display: none;
+  pointer-events: none; z-index: 9; opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(255,0,0,0.1) 0%, rgba(200,0,0,0.6) 60%, rgba(150,0,0,0.8) 100%);
+  transition: opacity 0.3s ease-out;
+}
+#damage-vignette {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 8; opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(180,0,0,0.5) 100%);
 }
 #level-message {
   position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
@@ -127,6 +133,7 @@ canvas { display: block; }
   <div id="level-message"></div>
 </div>
 <div id="damage-flash"></div>
+<div id="damage-vignette"></div>
 
 <script type="importmap">
 {
@@ -688,16 +695,40 @@ function killEnemy(enemy) {
   animate();
 }
 
+let damageFlashTimer = 0;
+
 function takeDamage(amount) {
   state.health -= amount;
-  // Flash red
+
+  // Red flash — intensity depends on damage
   const flash = document.getElementById('damage-flash');
-  flash.style.display = 'block';
-  setTimeout(() => { flash.style.display = 'none'; }, 100);
+  const intensity = Math.min(amount / 10, 1);
+  flash.style.opacity = 0.3 + intensity * 0.7;
+  damageFlashTimer = 0.3;
 
   if (state.health <= 0) {
     state.health = 0;
     gameOver();
+  }
+}
+
+function updateDamageEffects(delta) {
+  // Flash fade out
+  if (damageFlashTimer > 0) {
+    damageFlashTimer -= delta;
+    if (damageFlashTimer <= 0) {
+      document.getElementById('damage-flash').style.opacity = 0;
+    }
+  }
+
+  // Persistent red vignette when low HP
+  const vignette = document.getElementById('damage-vignette');
+  if (state.health < 40) {
+    const intensity = 1.0 - (state.health / 40);
+    const pulse = 0.3 + Math.sin(Date.now() * 0.004) * 0.15;
+    vignette.style.opacity = intensity * pulse + intensity * 0.4;
+  } else {
+    vignette.style.opacity = 0;
   }
 }
 
@@ -1010,6 +1041,7 @@ function animate() {
     updateMovement(delta);
     updateEnemies(delta);
     updateWeapon(delta);
+    updateDamageEffects(delta);
     updateHUD();
 
     // Reload animation
