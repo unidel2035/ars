@@ -78,6 +78,20 @@ canvas { display: block; }
   font-size: 36px; color: #0f0; text-shadow: 0 0 20px #0f0;
   display: none;
 }
+#hitmarker {
+  position: absolute; top: 50%; left: 50%;
+  width: 22px; height: 22px;
+  transform: translate(-50%, -50%);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.08s;
+}
+#hitmarker .hm-bar {
+  position: absolute; width: 22px; height: 2px;
+  background: #ff3333; box-shadow: 0 0 5px #ff0000;
+  top: 50%; left: 0; margin-top: -1px;
+}
+#hitmarker .hm-bar:first-child { transform: rotate(45deg); }
+#hitmarker .hm-bar:last-child  { transform: rotate(-45deg); }
 </style>
 </head>
 <body>
@@ -86,7 +100,8 @@ canvas { display: block; }
 <div id="main-menu" class="menu-overlay">
   <div class="menu-title">ARS</div>
   <div class="menu-subtitle">FIRST PERSON SHOOTER</div>
-  <button class="menu-btn" onclick="startGame()">PLAY</button>
+  <button class="menu-btn" onclick="startGame()">PLAY (Level 1–3)</button>
+  <button class="menu-btn" style="border-color:#aacc66;color:#aaff66" onclick="startDust2()">de_dust2</button>
   <div style="margin-top: 30px; text-align: center;">
     <label style="color: #888; font-size: 16px;">Mouse Sensitivity</label><br>
     <input type="range" id="sens-main" min="1" max="20" value="10" style="width: 200px; margin-top: 8px;"
@@ -131,6 +146,7 @@ canvas { display: block; }
   <div id="score-bar">Score: 0</div>
   <div id="level-bar">Level 1</div>
   <div id="level-message"></div>
+  <div id="hitmarker"><div class="hm-bar"></div><div class="hm-bar"></div></div>
 </div>
 <div id="damage-flash"></div>
 <div id="damage-vignette"></div>
@@ -180,7 +196,281 @@ const state = {
   mouseDown: false,
   shootCooldown: 0,
   cameraRecoil: 0,
+  footstepTimer: 0,
+  damageSoundCooldown: 0,
 };
+
+// ============ AUDIO ENGINE ============
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function resumeAudio() {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playGunshot() {
+  resumeAudio();
+  const t = audioCtx.currentTime;
+
+  // Noise crack
+  const bufSize = Math.floor(audioCtx.sampleRate * 0.15);
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) {
+    d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.12));
+  }
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buf;
+  const noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = 'highpass';
+  noiseFilter.frequency.value = 1500;
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.setValueAtTime(3.0, t);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(audioCtx.destination);
+  noise.start(t);
+
+  // Low thump body
+  const osc = audioCtx.createOscillator();
+  osc.frequency.setValueAtTime(200, t);
+  osc.frequency.exponentialRampToValueAtTime(55, t + 0.09);
+  const oscGain = audioCtx.createGain();
+  oscGain.gain.setValueAtTime(1.8, t);
+  oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  osc.connect(oscGain); oscGain.connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.1);
+}
+
+function playFootstep() {
+  resumeAudio();
+  const t = audioCtx.currentTime;
+  const bufSize = Math.floor(audioCtx.sampleRate * 0.06);
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) {
+    d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.25));
+  }
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 250 + Math.random() * 100;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.35, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+  noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  noise.start(t);
+}
+
+function playHit() {
+  resumeAudio();
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  osc.frequency.setValueAtTime(2000, t);
+  osc.frequency.exponentialRampToValueAtTime(800, t + 0.04);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.25, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.05);
+}
+
+function playEnemyDeath() {
+  resumeAudio();
+  const t = audioCtx.currentTime;
+  const bufSize = Math.floor(audioCtx.sampleRate * 0.25);
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) {
+    d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.45));
+  }
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(500, t);
+  filter.frequency.exponentialRampToValueAtTime(80, t + 0.25);
+  filter.Q.value = 2.5;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.9, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+  noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  noise.start(t);
+}
+
+function playPlayerDamage() {
+  resumeAudio();
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(220, t);
+  osc.frequency.exponentialRampToValueAtTime(80, t + 0.18);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.55, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.2);
+}
+
+function playReloadStart() {
+  resumeAudio();
+  playMechClick(0.55, 700);
+}
+
+function playReloadEnd() {
+  resumeAudio();
+  playMechClick(0.75, 1300);
+  setTimeout(() => playMechClick(0.5, 900), 80);
+}
+
+function playMechClick(vol, freq) {
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  osc.frequency.setValueAtTime(freq, t);
+  osc.frequency.exponentialRampToValueAtTime(freq * 0.4, t + 0.04);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(vol, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.05);
+}
+
+function playPortalOpen() {
+  resumeAudio();
+  const t = audioCtx.currentTime;
+  [0, 0.12, 0.25].forEach((delay, i) => {
+    const osc = audioCtx.createOscillator();
+    osc.frequency.setValueAtTime(250 + i * 180, t + delay);
+    osc.frequency.exponentialRampToValueAtTime(900 + i * 220, t + delay + 0.35);
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0, t + delay);
+    gain.gain.linearRampToValueAtTime(0.28, t + delay + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.4);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t + delay); osc.stop(t + delay + 0.4);
+  });
+}
+
+// ============ HIT MARKER ============
+let hitmarkerTimer = 0;
+function showHitMarker() {
+  document.getElementById('hitmarker').style.opacity = '1';
+  hitmarkerTimer = 0.12;
+}
+
+// ============ SPARK PARTICLES ============
+const sparks = [];
+
+function spawnSparks(position, normal) {
+  const count = 8 + Math.floor(Math.random() * 6);
+  for (let i = 0; i < count; i++) {
+    const geo = new THREE.BoxGeometry(0.015, 0.015, 0.05);
+    const col = Math.random() > 0.4 ? 0xffcc00 : 0xff6600;
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(position);
+
+    const spread = 0.9;
+    const speed = 3.5 + Math.random() * 5;
+    const vel = new THREE.Vector3(
+      normal.x + (Math.random() - 0.5) * spread,
+      normal.y + Math.random() * 0.4 + 0.1,
+      normal.z + (Math.random() - 0.5) * spread
+    ).normalize().multiplyScalar(speed);
+
+    const life = 0.25 + Math.random() * 0.25;
+    scene.add(mesh);
+    sparks.push({ mesh, vel, life, maxLife: life });
+  }
+}
+
+function updateSparks(delta) {
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i];
+    s.life -= delta;
+    if (s.life <= 0) {
+      scene.remove(s.mesh);
+      s.mesh.geometry.dispose();
+      s.mesh.material.dispose();
+      sparks.splice(i, 1);
+      continue;
+    }
+    s.vel.y -= 18 * delta;
+    s.mesh.position.addScaledVector(s.vel, delta);
+    s.mesh.material.opacity = s.life / s.maxLife;
+    // Orient along velocity
+    if (s.vel.lengthSq() > 0.01) {
+      s.mesh.lookAt(s.mesh.position.clone().add(s.vel));
+    }
+  }
+}
+
+// ============ SHELL CASINGS ============
+const casings = [];
+const MAX_CASINGS = 60;
+
+function spawnCasing() {
+  const geo = new THREE.CylinderGeometry(0.007, 0.007, 0.028, 7);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xb8860b, metalness: 0.85, roughness: 0.25, transparent: true });
+  const mesh = new THREE.Mesh(geo, mat);
+
+  const right = new THREE.Vector3();
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd);
+  right.crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+
+  mesh.position.copy(camera.position);
+  mesh.position.addScaledVector(right, 0.18);
+  mesh.position.addScaledVector(fwd, -0.05);
+  mesh.position.y -= 0.08;
+
+  const speed = 2.5 + Math.random() * 1.5;
+  const vel = new THREE.Vector3(
+    right.x * speed + (Math.random() - 0.5) * 0.5,
+    2.0 + Math.random() * 1.0,
+    right.z * speed + (Math.random() - 0.5) * 0.5
+  );
+  const rotVel = new THREE.Vector3(
+    (Math.random() - 0.5) * 22,
+    (Math.random() - 0.5) * 22,
+    (Math.random() - 0.5) * 22
+  );
+
+  scene.add(mesh);
+  casings.push({ mesh, vel, rotVel, life: 2.5, settled: false });
+
+  if (casings.length > MAX_CASINGS) {
+    const old = casings.shift();
+    scene.remove(old.mesh);
+    old.mesh.geometry.dispose();
+    old.mesh.material.dispose();
+  }
+}
+
+function updateCasings(delta) {
+  const floorY = 0.014;
+  for (const c of casings) {
+    c.life -= delta;
+    if (c.life < 0.5) {
+      c.mesh.material.opacity = c.life / 0.5;
+    }
+    if (c.settled) continue;
+
+    c.vel.y -= 20 * delta;
+    c.mesh.position.addScaledVector(c.vel, delta);
+    c.mesh.rotation.x += c.rotVel.x * delta;
+    c.mesh.rotation.y += c.rotVel.y * delta;
+    c.mesh.rotation.z += c.rotVel.z * delta;
+
+    if (c.mesh.position.y <= floorY) {
+      c.mesh.position.y = floorY;
+      c.vel.y = -c.vel.y * 0.28;
+      c.vel.x *= 0.55;
+      c.vel.z *= 0.55;
+      c.rotVel.multiplyScalar(0.25);
+      if (Math.abs(c.vel.y) < 0.3) c.settled = true;
+    }
+  }
+}
 
 // ============ LEVEL CONFIGS ============
 const levels = [
@@ -219,6 +509,14 @@ const levels = [
       { x: 14, z: -8, w: 2, h: 2, d: 2 },
     ],
     lightColor: 0xff5533, lightIntensity: 0.8,
+  },
+  {
+    name: "de_dust2",
+    isDust2: true,
+    size: 160, wallHeight: 4.8, enemyCount: 16,
+    floorColor: 0x948060, wallColor: 0x9a7850,
+    enemySpeed: 5, obstacles: [],
+    lightColor: 0xfff2d0, lightIntensity: 2.0,
   }
 ];
 
@@ -303,6 +601,10 @@ function clearLevel() {
   if (gateObject) scene.remove(gateObject);
   for (const h of bulletHoles) scene.remove(h);
   bulletHoles.length = 0;
+  for (const s of sparks) scene.remove(s.mesh);
+  sparks.length = 0;
+  for (const c of casings) scene.remove(c.mesh);
+  casings.length = 0;
   levelObjects = [];
   levelLights = [];
   state.enemies = [];
@@ -311,6 +613,7 @@ function clearLevel() {
 }
 
 function buildLevel(index) {
+  if (levels[index].isDust2) { buildDust2(); return; }
   clearLevel();
   const cfg = levels[index];
   const half = cfg.size / 2;
@@ -516,6 +819,389 @@ function spawnEnemy(cfg, half, index) {
   });
 }
 
+// spawnEnemyAt — absolute position, used by buildDust2
+function spawnEnemyAt(x, y, z, speed, detectionRange) {
+  const enemyGroup = new THREE.Group();
+  const bodyGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.2, 8);
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2a5a2a, roughness: 0.5 });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 0.9; body.castShadow = true;
+  enemyGroup.add(body);
+  const headGeo = new THREE.SphereGeometry(0.25, 8, 6);
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xd4a870, roughness: 0.5 });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.y = 1.65; head.castShadow = true;
+  enemyGroup.add(head);
+  const eyeGeo = new THREE.SphereGeometry(0.05, 4, 4);
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 2 });
+  [-0.1, 0.1].forEach(dx => {
+    const e = new THREE.Mesh(eyeGeo, eyeMat);
+    e.position.set(dx, 1.7, -0.22);
+    enemyGroup.add(e);
+  });
+  enemyGroup.position.set(x, y, z);
+  scene.add(enemyGroup);
+  state.enemies.push({ mesh: enemyGroup, health: 100, speed, alive: true,
+    attackRange: 2, detectionRange, bodyMat, headMat });
+}
+
+// ============ DUST 2 MAP ============
+function buildDust2() {
+  clearLevel();
+  scene.background = new THREE.Color(0x87c2e8);
+  scene.fog = new THREE.Fog(0xc8bfaa, 50, 140);
+
+  const WH  = 4.8;  // outdoor wall/ceiling height
+  const TH  = 3.6;  // tunnel ceiling height
+  const T   = 0.35; // wall thickness
+
+  // ── helpers ────────────────────────────────────────────────────────
+  function floor(x1,z1,x2,z2,y,col){
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(x2-x1),Math.abs(z2-z1)),
+      new THREE.MeshStandardMaterial({color:col,roughness:.9,side:THREE.DoubleSide}));
+    m.rotation.x=-Math.PI/2; m.position.set((x1+x2)/2,y,(z1+z2)/2);
+    m.receiveShadow=true; scene.add(m); levelObjects.push(m);
+  }
+  function ceil(x1,z1,x2,z2,y,col=0x4a3e30){
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(x2-x1),Math.abs(z2-z1)),
+      new THREE.MeshStandardMaterial({color:col,roughness:1,side:THREE.DoubleSide}));
+    m.rotation.x=Math.PI/2; m.position.set((x1+x2)/2,y,(z1+z2)/2);
+    scene.add(m); levelObjects.push(m);
+  }
+  // axis-aligned wall box (has collision)
+  function wall(cx,cz,wx,wz,h,col,y0=0){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(wx,h,wz),
+      new THREE.MeshStandardMaterial({color:col,roughness:.75}));
+    m.position.set(cx,y0+h/2,cz);
+    m.castShadow=true; m.receiveShadow=true; m.userData.isObstacle=true;
+    scene.add(m); levelObjects.push(m); return m;
+  }
+  // prop / cover box (has collision)
+  function prop(cx,cz,w,h,d,col,y0=0){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
+      new THREE.MeshStandardMaterial({color:col,roughness:.6}));
+    m.position.set(cx,y0+h/2,cz);
+    m.castShadow=true; m.receiveShadow=true; m.userData.isObstacle=true;
+    scene.add(m); levelObjects.push(m); return m;
+  }
+  function pl(x,y,z,col,i,dist){
+    const l=new THREE.PointLight(col,i,dist);
+    l.position.set(x,y,z); scene.add(l); levelLights.push(l);
+  }
+
+  // ── GLOBAL LIGHTING ───────────────────────────────────────────────
+  const amb=new THREE.AmbientLight(0xddd4c0,0.85); scene.add(amb); levelLights.push(amb);
+  const sun=new THREE.DirectionalLight(0xfff2d0,2.0);
+  sun.position.set(-40,80,30); sun.castShadow=true;
+  sun.shadow.mapSize.set(2048,2048);
+  ['left','right','top','bottom'].forEach((k,i)=>sun.shadow.camera[k]=[-100,100,100,-100][i]);
+  scene.add(sun); levelLights.push(sun);
+  const sky=new THREE.HemisphereLight(0x87c2e8,0x8a7458,0.7);
+  scene.add(sky); levelLights.push(sky);
+
+  // ════════════════════════════════════════════════════════
+  //  T SPAWN  [x:-66..-36  z:28..54]
+  // ════════════════════════════════════════════════════════
+  floor(-66,28,-36,54, 0, 0x9a8458);
+  // walls
+  wall(-51,54, 30,T,WH, 0xa08060); // back S
+  wall(-66,41,  T,26,WH, 0xa08060); // W
+  wall(-50,28, 28,T,WH, 0xa08060); // N partial left (gap: x[-36..-28] for Long T exit)
+  wall(-31,28,  T,T,WH, 0xa08060); // N right stub
+  // T Platform (raised AWP ledge)
+  prop(-48,40, 14,1.5,7, 0x7a6040);
+  // Sandbags
+  prop(-44,29.5, 1.8,1.1,4, 0x7a6040);
+  prop(-40,29.5, 1.8,1.1,4, 0x7a6040);
+  pl(-52,4,41, 0xffe8c0,3,28);
+
+  // ════════════════════════════════════════════════════════
+  //  LONG T / OUTSIDE LONG  [x:-66..-26  z:8..28]
+  // ════════════════════════════════════════════════════════
+  floor(-66,8,-26,28, 0, 0x948060);
+  wall(-46,28, 40,T,WH, 0x9a7850); // S (shares with T spawn N)
+  wall(-46, 8, 40,T,WH, 0x9a7850); // N
+  wall(-66,18,  T,20,WH, 0x9a7850); // W
+  // Blue crate — big wooden box T-side of Long A
+  prop(-42,10, 3,3.2,2.2, 0x2a4a7a);
+  pl(-46,4,18, 0xffe0b0,2.5,22);
+
+  // ════════════════════════════════════════════════════════
+  //  LONG DOORS  [x:-26..-16  z:8..20]
+  // ════════════════════════════════════════════════════════
+  floor(-26,8,-16,20, 0, 0x948060);
+  // Door frame pillars
+  wall(-23,13.5, 3.5,T+.1,WH, 0x7a5540); wall(-23,9.5,3.5,T+.1,WH,0x7a5540);
+  wall(-17,13.5, 3.5,T+.1,WH, 0x7a5540); wall(-17,9.5,3.5,T+.1,WH,0x7a5540);
+  // Lintel beams above doorways
+  prop(-21,14, 10,1.0,.5, 0x7a5540, WH-.8);
+  prop(-21, 9.5,10,1.0,.5, 0x7a5540, WH-.8);
+  pl(-21,3.5,12, 0xffd080,2.5,14);
+
+  // ════════════════════════════════════════════════════════
+  //  LONG A (main corridor)  [x:-16..12  z:8..20]
+  // ════════════════════════════════════════════════════════
+  floor(-16,8,12,20, 0, 0x948060);
+  wall(-2, 8,28,T,WH, 0x8b6040); // N wall
+  wall(-2,20,28,T,WH, 0x8b6040); // S wall
+  // A Long Car (near A site end, N side)
+  prop( 5,10, 3.5,1.5,6.5, 0x3a2a1a);
+  prop( 5,10, 3.8, .6,7.0, 0x1a1a1a, 1.5);
+  prop( 3,10,  .8, .4, .8, 0x111111); prop(7,10,.8,.4,.8,0x111111);
+  pl(-4,4,14, 0xffe8b0,2.5,22); pl(5,4,14,0xffe8b0,2,18);
+
+  // ════════════════════════════════════════════════════════
+  //  PIT  [x:8..22  z:16..30]  y=-2.5
+  // ════════════════════════════════════════════════════════
+  floor(8,16,22,30, -2.5, 0x6a5035);
+  wall( 8,23, T,14, 2.5+WH, 0x7a5535); // W retaining
+  wall(22,23, T,14, 2.5+WH, 0x7a5535); // E retaining
+  wall(15,30, 14,T,    WH,  0x7a5535); // S
+  // Pit platform / ledge
+  prop(10,25, 4,1.5,4, 0x8a6545, -2.5);
+  pl(15,1,23, 0xffcc80,2,16);
+
+  // ════════════════════════════════════════════════════════
+  //  A RAMP  [slopes from Long A y=0 to A Site y=2.5]
+  // ════════════════════════════════════════════════════════
+  // Approximated as a sloped platform + side walls
+  {
+    const g=new THREE.BoxGeometry(10,2.5,16);
+    const mb=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x8a7040,roughness:.9}));
+    mb.position.set(13,0.25,6); mb.rotation.x=-Math.atan2(2.5,16);
+    mb.receiveShadow=true; mb.userData.isObstacle=true;
+    scene.add(mb); levelObjects.push(mb);
+  }
+  wall( 8,6, T,18,WH+2.5, 0x8b6040); // W side of ramp
+  wall(18,6, T,18,WH+2.5, 0x8b6040); // E side
+
+  // ════════════════════════════════════════════════════════
+  //  A SITE  [x:12..44  z:-14..14]  y=2.5
+  // ════════════════════════════════════════════════════════
+  floor(12,-14,44,14, 2.5, 0x8c7a58);
+  wall(28,14, 32,T,WH, 0x8b5535, 2.5); // back wall
+  wall(28,-14,32,T,WH, 0x8b5535, 2.5); // front (toward Short)
+  wall(12, 0,  T,28,WH, 0x8b5535, 2.5); // W wall
+  wall(44, 0,  T,28,WH, 0x8b5535, 2.5); // E wall (CT side)
+  // CT Boxes (standard plant cover — two stacks)
+  prop(17, 0, 2.4,1.4,2.0, 0x7a5530, 2.5);
+  prop(17, 0, 2.0,1.4,1.8, 0x6a4520, 2.5+1.4);
+  // Big CT box
+  prop(20, 4, 2.5,3.2,2.5, 0x7a5530, 2.5);
+  // A Platform (large elevated platform, E of site)
+  prop(36, 2,14,2.0,18, 0x6a5030, 2.5);
+  // Barrels near A plat
+  prop(27,5, 1.0,2.0,1.0, 0x404040, 2.5);
+  prop(27,3, 1.0,2.0,1.0, 0x404040, 2.5);
+  // Car on A site (near CT approach)
+  prop(40, 5, 4.0,1.8,8.0, 0x2a3520, 2.5);
+  // Goose corner (dead end behind A plat)
+  prop(44,-12, T,WH,4.0, 0x7a5535, 2.5);
+  pl(22,5.5,0, 0xfff0cc,3,22); pl(38,5.5,4, 0xfff0cc,2.5,20);
+
+  // ════════════════════════════════════════════════════════
+  //  A SHORT  [x:18..44  z:-30..-14]  y=2.5
+  // ════════════════════════════════════════════════════════
+  floor(18,-30,44,-14, 2.5, 0x8c7a58);
+  wall(18,-22, T,16,WH, 0x8b5535, 2.5); // W wall
+  wall(44,-22, T,16,WH, 0x8b5535, 2.5); // E wall
+  wall(31,-30,26, T,WH, 0x8b5535, 2.5); // N wall toward CT
+  // Short boost dumpster
+  prop(22,-20, 1.8,1.6,2.5, 0x505060, 2.5);
+  pl(31,5.5,-22, 0xffd0a0,2.5,18);
+
+  // ════════════════════════════════════════════════════════
+  //  SHORT STAIRS (from CT Mid y=0 up to A Short y=2.5)
+  // ════════════════════════════════════════════════════════
+  for(let i=0;i<6;i++) prop(20+i*1.4,-20, 1.4,.45,5, 0x8a6040, i*0.42);
+
+  // ════════════════════════════════════════════════════════
+  //  CT SPAWN  [x:40..64  z:-52..-24]
+  // ════════════════════════════════════════════════════════
+  floor(40,-52,64,-24, 0, 0x888070);
+  ceil(40,-52,64,-24, WH);
+  wall(52,-52,24, T,WH, 0x787060); // N
+  wall(52,-24,24, T,WH, 0x787060); // S
+  wall(64,-38, T,28,WH, 0x787060); // E
+  wall(40,-38, T,28,WH, 0x787060); // W
+  prop(50,-30, 2,1.5,2, 0x7a5530); prop(56,-42,2,2,2,0x7a5530);
+  pl(52,3.5,-38, 0xffe0c0,3,24); pl(46,3,-44,0xffc080,2,16);
+
+  // ════════════════════════════════════════════════════════
+  //  CT MID  [x:20..42  z:-26..-8]  (connects CT spawn, Short, Mid Doors)
+  // ════════════════════════════════════════════════════════
+  floor(20,-26,42,-8, 0, 0x8a7858);
+  ceil(20,-26,42,-8, WH);
+  wall(20,-17, T,18,WH, 0x787060); // W
+  wall(42,-17, T,18,WH, 0x787060); // E
+  pl(31,3.5,-17, 0xffe0c0,2.5,18);
+
+  // ════════════════════════════════════════════════════════
+  //  MID  [x:-24..20  z:-18..-4]
+  // ════════════════════════════════════════════════════════
+  floor(-24,-18,20,-4, 0, 0x948060);
+  wall(-12,-18,24, T,WH, 0x8b6040); // N wall (T side entry)
+  wall(-12, -4,24, T,WH, 0x8b6040); // S wall
+  wall(20,-11,  T,14,WH, 0x8b6040); // E (before mid doors)
+  // XBOX — big crate used to boost onto catwalk
+  prop(2,-10, 2.5,1.6,2.5, 0x4a5f7a); // main box
+  prop(2,-10, 2.0, .5,2.0, 0x3a4f6a, 1.6); // smaller top box
+  // T mid wall (raised ledge for AWP through Mid)
+  prop(-18,-6, 6.0,1.2,1.0, 0x8b6040);
+  // Suicide dip
+  floor(-24,-12,-18,-4, -0.8, 0x6a5030);
+  pl(-6,4,-11, 0xffe8b0,2.5,22); pl(10,4,-11,0xffe8b0,2,18);
+
+  // ════════════════════════════════════════════════════════
+  //  MID DOORS  [x:14..24  z:-24..-4]
+  // ════════════════════════════════════════════════════════
+  floor(14,-24,24,-4, 0, 0x948060);
+  wall(19,-22,10, T,WH, 0x8b6040); // N
+  wall(19, -6,10, T,WH, 0x8b6040); // S
+  wall(17,-15,  T,4,WH, 0x8b6040); // left door pillar
+  wall(21,-15,  T,4,WH, 0x8b6040); // right door pillar
+  prop(19,-20.5,10,1.0,.5, 0x8b6040, WH-.7);
+  prop(19, -7.5,10,1.0,.5, 0x8b6040, WH-.7);
+  pl(19,3.5,-15, 0xffcc80,3,14);
+
+  // ════════════════════════════════════════════════════════
+  //  CATWALK  [x:18..40  z:-26..-8]  y=3.2
+  // ════════════════════════════════════════════════════════
+  floor(18,-26,40,-8, 3.2, 0x7a6a50);
+  ceil(18,-26,40,-8,  3.2+3.0);
+  wall(18,-17, T,18,1.0, 0x7a6040, 3.2); // left railing
+  wall(40,-17, T,18,1.0, 0x7a6040, 3.2); // right railing
+  wall(29,-26,22, T,3.2, 0x7a6040);      // wall below catwalk N
+  wall(29, -8,22, T,3.2, 0x7a6040);      // wall below catwalk S
+  // Ramp from Xbox up to catwalk
+  for(let i=0;i<7;i++) prop(5+i*2,-12, 2,.5,3.8, 0x8a6040, i*(3.2/7));
+  // Palm (telephone pole)
+  prop(19.5,-10, .25,5.5,.25, 0x6b4c2a, 3.2);
+  pl(29,6,-17, 0xffe0b0,2.5,20);
+
+  // ════════════════════════════════════════════════════════
+  //  OUTSIDE TUNNELS  [x:-64..-36  z:-8..8]
+  // ════════════════════════════════════════════════════════
+  floor(-64,-8,-36,8, 0, 0x948060);
+  wall(-50,-8,28, T,WH, 0x8b6040); // N
+  wall(-50, 8,28, T,WH, 0x8b6040); // S
+  wall(-64, 0, T,16,WH, 0x8b6040); // W
+  // Transition strip connecting T spawn south to tunnel entrance
+  floor(-42,8,-36,28, 0, 0x948060);
+  pl(-50,4,0, 0xffe0b0,2.5,20);
+
+  // ════════════════════════════════════════════════════════
+  //  UPPER TUNNELS  [x:-64..-14  z:-24..-8]
+  // ════════════════════════════════════════════════════════
+  floor(-64,-24,-14,-8, 0, 0x7a6a50);
+  ceil(-64,-24,-14,-8, TH);
+  wall(-39, -8,50,T,TH, 0x7a5535); // S wall
+  wall(-39,-24,50,T,TH, 0x7a5535); // N wall
+  wall(-64,-16, T,16,TH, 0x7a5535); // W
+  // Arch pillars
+  prop(-52,-16, T,TH,.8, 0x7a5535); prop(-40,-16,T,TH,.8,0x7a5535); prop(-28,-16,T,TH,.8,0x7a5535);
+  pl(-50,3,-16, 0xffcc60,2.5,20); pl(-30,3,-16,0xffcc60,2.5,20);
+
+  // ════════════════════════════════════════════════════════
+  //  LOWER TUNNELS  [x:-64..-14  z:-38..-24]
+  // ════════════════════════════════════════════════════════
+  floor(-64,-38,-14,-24, 0, 0x6a5a40);
+  ceil(-64,-38,-14,-24, TH, 0x3a2a20);
+  wall(-39,-24,50,T,TH, 0x6a4a30); // S
+  wall(-39,-38,50,T,TH, 0x6a4a30); // N
+  wall(-64,-31, T,14,TH, 0x6a4a30); // W
+  // Staircase upper→lower (at east end of tunnels)
+  for(let i=0;i<5;i++) prop(-15.5-i*1.3,-25+i*1.2, T,0.55,1.6, 0x6a4a30, i*0.55);
+  pl(-48,3,-31, 0xffaa40,2.5,18); pl(-28,3,-31,0xffaa40,2.5,18);
+
+  // ════════════════════════════════════════════════════════
+  //  B DOORS  [x:-14..8  z:-52..-34]
+  // ════════════════════════════════════════════════════════
+  floor(-14,-52,8,-34, 0, 0x8a7858);
+  ceil(-14,-52,8,-34, WH, 0x3a3028);
+  wall(-3,-34,22, T,WH, 0x7a5535); // S
+  wall(-3,-52,22, T,WH, 0x7a5535); // N
+  wall(-14,-43, T,18,WH, 0x7a5535); // W
+  wall(  8,-43, T,18,WH, 0x7a5535); // E
+  wall( -4,-43, T,4,WH, 0x7a5535); // left door pillar
+  wall(  2,-43, T,4,WH, 0x7a5535); // right door pillar
+  pl(-3,3.5,-43, 0xffcc80,2.5,16);
+
+  // ════════════════════════════════════════════════════════
+  //  B SITE  [x:-60..-8  z:-72..-46]
+  // ════════════════════════════════════════════════════════
+  floor(-60,-72,-8,-46, 0, 0x857560);
+  // Perimeter
+  wall(-34,-72,52,T,WH, 0x7a5535); // N (back)
+  wall(-34,-46,52,T,WH, 0x7a5535); // S (front)
+  wall(-60,-59, T,26,WH, 0x7a5535); // W
+  wall( -8,-59, T,26,WH, 0x7a5535); // E (B doors side)
+  // B Platform (main elevated plant area)
+  prop(-36,-59, 22,1.8,20, 0x6a5030);
+  // Boxes on B plat (default plant cover)
+  prop(-38,-52, 2.5,1.8,2.5, 0x7a5530, 1.8);
+  prop(-38,-54, 2.5,1.2,2.5, 0x6a4520, 1.8);
+  prop(-36,-52, 2.0,3.0,2.0, 0x7a5530, 1.8); // tall stack
+  // B Van (near B Closet)
+  prop(-55,-55, 3.0,2.2,6.5, 0x3a4a3a);
+  prop(-55,-55, 3.2,1.0,7.0, 0x2a3a2a, 2.2);
+  prop(-53,-55,  .8, .4, .8, 0x111111); prop(-57,-55,.8,.4,.8,0x111111);
+  // B Closet (dead-end alcove behind van)
+  wall(-60,-50, T,8,WH, 0x7a5535);
+  prop(-58.5,-51, 2,WH,T, 0x7a5535);
+  // Big Box (boost to B plat)
+  prop(-26,-48, 2.0,1.6,2.0, 0x7a5530);
+  // Scaffolding (elevated vantage)
+  prop(-12,-56, 2.0,3.5,4.0, 0x505055);
+  prop(-12,-56, 2.5, .15,3.5, 0x404045, 3.5);
+  // B Window (wall gap — indicated by frame)
+  prop(-22,-46, 4.5,WH,T, 0x7a5535);
+  // B site lighting
+  pl(-34,4,-58, 0xffecc0,3,28); pl(-52,4,-64,0xffd0a0,2.5,22); pl(-16,4,-52,0xffecc0,2.5,20);
+
+  // ════════════════════════════════════════════════════════
+  //  ENEMIES — 16 CT defenders
+  // ════════════════════════════════════════════════════════
+  const spd=5, det=32;
+  [
+    // A Site area
+    [18,2.5,2], [30,2.5,6], [40,2.5,-6],
+    // A Short
+    [26,2.5,-22],
+    // CT Spawn
+    [48,0,-36], [58,0,-44],
+    // CT Mid
+    [26,0,-16], [36,0,-14],
+    // Mid Doors
+    [19,0,-16],
+    // Long A
+    [-6,0,14], [4,0,14],
+    // B Site
+    [-30,0,-58], [-46,0,-64], [-52,0,-52],
+    // Upper Tunnels
+    [-32,0,-16],
+    // B Doors
+    [-4,0,-44],
+  ].forEach(([x,y,z])=>spawnEnemyAt(x,y,z,spd,det));
+
+  // ════════════════════════════════════════════════════════
+  //  GATE (CT Spawn) — visible after all enemies killed
+  // ════════════════════════════════════════════════════════
+  const gm=new THREE.Mesh(
+    new THREE.BoxGeometry(2,3,.1),
+    new THREE.MeshStandardMaterial({color:0x33ff33,emissive:0x33ff33,emissiveIntensity:2,transparent:true,opacity:.7})
+  );
+  gm.position.set(52,1.5,-40); gm.visible=false;
+  scene.add(gm); gateObject=gm;
+
+  // Player starts at T Spawn
+  camera.position.set(-50, state.playerHeight, 46);
+  state.velocity.set(0,0,0); state.verticalVelocity=0; state.onGround=true;
+  state.health=state.maxHealth; state.ammo=state.maxAmmo;
+  state.canShoot=true; state.isReloading=false; state.reloadTimer=0;
+  showLevelMessage("de_dust2 — Kill all CTs!");
+}
+
 // ============ GAME LOGIC ============
 function updateEnemies(delta) {
   const playerPos = camera.position.clone();
@@ -558,6 +1244,7 @@ function updateEnemies(delta) {
   if (!gateActive && state.enemies.every(e => !e.alive)) {
     gateActive = true;
     if (gateObject) gateObject.visible = true;
+    playPortalOpen();
     showLevelMessage("Portal opened!");
   }
 
@@ -583,6 +1270,8 @@ function shoot() {
   state.shootCooldown = state.fireRate / 1000;
   state.ammo--;
   weaponRecoil = 1.0;
+  playGunshot();
+  spawnCasing();
 
   // Camera recoil — vertical only, capped
   const maxRecoil = 0.06; // ~3.5 degrees max
@@ -625,6 +1314,8 @@ function shoot() {
       });
       if (found) {
         damageEnemy(enemy, state.damage);
+        playHit();
+        showHitMarker();
         hitEnemy = true;
         break;
       }
@@ -638,6 +1329,7 @@ function shoot() {
       const hit = wallHits[0];
       const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : raycaster.ray.direction.clone().negate();
       spawnBulletHole(hit.point, normal);
+      spawnSparks(hit.point, normal);
     }
   }
 }
@@ -702,6 +1394,7 @@ function damageEnemy(enemy, amount) {
 function killEnemy(enemy) {
   enemy.alive = false;
   state.score += 100;
+  playEnemyDeath();
 
   // Death animation — shrink and remove
   const startScale = { y: 1 };
@@ -723,6 +1416,12 @@ let damageFlashTimer = 0;
 
 function takeDamage(amount) {
   state.health -= amount;
+
+  // Sound (throttled)
+  if (state.damageSoundCooldown <= 0) {
+    playPlayerDamage();
+    state.damageSoundCooldown = 0.4;
+  }
 
   // Red flash — intensity depends on damage
   const flash = document.getElementById('damage-flash');
@@ -775,6 +1474,7 @@ function startReload() {
   if (state.isReloading) return;
   state.isReloading = true;
   state.reloadTimer = state.reloadTime;
+  playReloadStart();
 }
 
 function updateReload(delta) {
@@ -803,6 +1503,7 @@ function updateReload(delta) {
     state.isReloading = false;
     state.ammo = state.maxAmmo;
     state.reloadTimer = 0;
+    playReloadEnd();
   }
 }
 
@@ -895,7 +1596,23 @@ function setSensitivity(val) {
 window.setSensitivity = setSensitivity;
 
 // Expose to HTML buttons
+function startDust2() {
+  hideAllMenus();
+  document.getElementById('hud').style.display = 'block';
+  state.score = 0;
+  state.level = 3; // dust2 index
+  state.playing = true;
+  state.paused = false;
+  scene.clear();
+  camera.add(weaponGroup);
+  scene.add(camera);
+  createWeapon();
+  buildLevel(3);
+  controls.lock();
+}
+
 window.startGame = startGame;
+window.startDust2 = startDust2;
 window.resumeGame = resumeGame;
 window.goToMenu = goToMenu;
 
@@ -956,6 +1673,19 @@ function updateMovement(delta) {
   // Clamp to room
   camera.position.x = THREE.MathUtils.clamp(camera.position.x, -half, half);
   camera.position.z = THREE.MathUtils.clamp(camera.position.z, -half, half);
+
+  // Footsteps
+  const isMoving = state.keys['KeyW'] || state.keys['KeyS'] || state.keys['KeyA'] || state.keys['KeyD'];
+  const stepInterval = state.isCrouching ? 0.55 : 0.38;
+  if (isMoving && state.onGround && controls.isLocked) {
+    state.footstepTimer -= delta;
+    if (state.footstepTimer <= 0) {
+      playFootstep();
+      state.footstepTimer = stepInterval;
+    }
+  } else {
+    state.footstepTimer = 0;
+  }
 
   // Simple obstacle collision
   for (const obj of levelObjects) {
@@ -1020,6 +1750,7 @@ function updateHUD() {
 
 // ============ INPUT ============
 document.addEventListener('keydown', (e) => {
+  resumeAudio();
   state.keys[e.code] = true;
 
   if (e.code === 'Escape' && state.playing) {
@@ -1037,6 +1768,7 @@ document.addEventListener('keyup', (e) => {
 });
 
 document.addEventListener('mousedown', (e) => {
+  resumeAudio();
   if (e.button === 0) state.mouseDown = true;
 });
 
@@ -1077,6 +1809,13 @@ function animate() {
     updateWeapon(delta);
     updateDamageEffects(delta);
     updateRecoilRecovery(delta);
+    updateSparks(delta);
+    updateCasings(delta);
+    if (state.damageSoundCooldown > 0) state.damageSoundCooldown -= delta;
+    if (hitmarkerTimer > 0) {
+      hitmarkerTimer -= delta;
+      if (hitmarkerTimer <= 0) document.getElementById('hitmarker').style.opacity = '0';
+    }
     updateHUD();
 
     // Force stable horizon — never allow roll
@@ -1097,6 +1836,7 @@ function animate() {
 }
 
 animate();
+window.__game = { camera, scene, state, controls };
 </script>
 </body>
 </html>
